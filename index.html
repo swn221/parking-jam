@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>1분 주차 탈출 게임 (Car Parking Unblock)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;800&display=swap');
+        body {
+            font-family: 'Pretendard', sans-serif;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        /* Realistic Parking Lot Pavement Texture & Asphalt Graphics */
+        .parking-grid {
+            background-color: #1e293b;
+            background-image: 
+                /* Parking stalls lines (white crisp stripes grid) */
+                linear-gradient(rgba(255, 255, 255, 0.25) 2px, transparent 2px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.25) 2px, transparent 2px),
+                /* Asphalt texture grain simulation */
+                radial-gradient(rgba(255, 255, 255, 0.05) 15%, transparent 16%);
+            background-size: calc(100% / 15) calc(100% / 15), calc(100% / 15) calc(100% / 15), 20px 20px;
+            box-shadow: inset 0 0 30px rgba(0,0,0,0.6), 0 10px 25px rgba(0,0,0,0.3);
+            border: 6px solid #334155;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between items-center p-4">
+
+    <!-- Header Section: Title & Level Info -->
+    <header class="w-full max-w-md flex justify-between items-center bg-slate-900/90 backdrop-blur p-4 rounded-2xl border border-slate-800 shadow-xl">
+        <div>
+            <h1 class="text-xl font-extrabold text-amber-400 tracking-wider">주차지옥</h1>
+            <p class="text-xs text-slate-400">남은 차: <span id="remaining-cars" class="font-bold text-white text-sm">80</span>대</p>
+        </div>
+        <!-- Timer UI -->
+        <div class="flex items-center gap-2 bg-slate-800 px-4 py-2 rounded-xl border border-slate-700 shadow-inner">
+            <svg class="w-5 h-5 text-amber-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <span id="timer" class="text-2xl font-black text-amber-400 font-mono">60.0</span>
+            <span class="text-xs text-slate-400">초</span>
+        </div>
+    </header>
+
+    <!-- Game Board Section -->
+    <main class="w-full max-w-md my-auto flex flex-col items-center justify-center">
+        <!-- Scaled board container adjusted up to 1.25x (scale-125) -->
+        <div id="board-container" class="relative w-full aspect-square max-w-[800px] scale-125 md:scale-125 origin-center my-10 bg-slate-900 rounded-3xl p-4 shadow-2xl border-4 border-slate-800 flex items-center justify-center overflow-hidden">
+            
+            <!-- Parking Lot Asphalt Base & Entry Signs -->
+            <div class="absolute inset-0 bg-slate-900 overflow-hidden opacity-90">
+                <!-- Asphalt texture lines / entry arrows -->
+                <div class="absolute top-2 left-1/2 -translate-x-1/2 text-slate-500 text-[10px] font-black tracking-widest uppercase">ENTRANCE ▲</div>
+                <div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-slate-500 text-[10px] font-black tracking-widest uppercase">EXIT ▼</div>
+                <div class="absolute left-2 top-1/2 -translate-y-1/2 -rotate-90 text-slate-500 text-[10px] font-black tracking-widest uppercase">PARKING ZONE</div>
+            </div>
+
+            <!-- Parking Grid Board (15x15 Grid with Real Parking Lot Look) -->
+            <div id="board" class="parking-grid relative w-full h-full rounded-xl overflow-visible z-10">
+                <!-- Cars will be generated here dynamically -->
+            </div>
+
+            <!-- Overlays: Game Start / Game Over / Victory -->
+            <div id="overlay" class="absolute inset-0 bg-slate-950/95 rounded-3xl backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-30 transition-all duration-300">
+                <div id="overlay-icon" class="text-6xl mb-3">🚌</div>
+                <h2 id="overlay-title" class="text-2xl font-black mb-2 text-white">주차지옥 (차량 80대)</h2>
+                <p id="overlay-desc" class="text-slate-300 text-sm mb-6 max-w-[240px] leading-relaxed">
+                    지하 주차장에 빽빽하게 얽힌 80대의 차량을 60초 내에 모두 탈출시키세요!
+                </p>
+                <button id="start-btn" onclick="startGame()" class="w-full py-4 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-lg rounded-2xl shadow-lg shadow-amber-500/30 transition-all">
+                    게임 시작
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer Controls -->
+    <footer class="w-full max-w-md flex justify-between items-center text-xs text-slate-400 px-2 py-2">
+        <span>규칙: 모든 차를 터치해 빼내기</span>
+        <button onclick="resetGame()" class="text-slate-300 underline hover:text-white">다시 시작</button>
+    </footer>
+
+    <!-- Audio Effects (Web Audio API Synthesizer - No External Assets Required) -->
+    <script>
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        let audioCtx;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new AudioCtx();
+            }
+        }
+
+        // Sound 1: Car Move Out Success
+        function playSuccessSound() {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.15);
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.15);
+        }
+
+        // Sound 2: Car Collision Sound (Honk/Thud)
+        function playCrashSound() {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+            osc.frequency.setValueAtTime(90, audioCtx.currentTime + 0.1);
+            gain.gain.setValueAtTime(0.35, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.25);
+        }
+
+        // Sound 3: Game Over Sound
+        function playGameOverSound() {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.5);
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.5);
+        }
+
+        // Sound 4: Victory Sound
+        function playVictorySound() {
+            if (!audioCtx) return;
+            const notes = [400, 500, 600, 800];
+            notes.forEach((freq, idx) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime + idx * 0.1);
+                gain.gain.setValueAtTime(0.2, audioCtx.currentTime + idx * 0.1);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + idx * 0.1 + 0.2);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(audioCtx.currentTime + idx * 0.1);
+                osc.stop(audioCtx.currentTime + idx * 0.1 + 0.2);
+            });
+        }
+    </script>
+
+    <!-- Core Game Logic -->
+    <script>
+        const GRID_SIZE = 15;
+        // 정확히 80대 유지
+        const TARGET_CARS = 80;
+        const TIME_LIMIT = 60.0;
+
+        let cars = [];
+        let grid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
+        let remainingCars = 0;
+        let timerInterval = null;
+        let startTime = 0;
+        let elapsedTime = 0;
+        let isPlaying = false;
+
+        const CAR_COLORS = [
+            { bg: 'bg-red-500', border: 'border-red-600', text: 'text-white' },
+            { bg: 'bg-blue-500', border: 'border-blue-600', text: 'text-white' },
+            { bg: 'bg-emerald-500', border: 'border-emerald-600', text: 'text-white' },
+            { bg: 'bg-amber-500', border: 'border-amber-600', text: 'text-slate-950' },
+            { bg: 'bg-purple-500', border: 'border-purple-600', text: 'text-white' },
+            { bg: 'bg-pink-500', border: 'border-pink-600', text: 'text-white' },
+            { bg: 'bg-cyan-500', border: 'border-cyan-600', text: 'text-slate-950' },
+            { bg: 'bg-orange-500', border: 'border-orange-600', text: 'text-white' },
+            { bg: 'bg-indigo-500', border: 'border-indigo-600', text: 'text-white' },
+            { bg: 'bg-teal-500', border: 'border-teal-600', text: 'text-white' }
+        ];
+
+        const ARROWS = {
+            'UP': '▲',
+            'DOWN': '▼',
+            'LEFT': '◄',
+            'RIGHT': '►'
+        };
+
+        const boardEl = document.getElementById('board');
+        const remainingCarsEl = document.getElementById('remaining-cars');
+        const timerEl = document.getElementById('timer');
+        const overlayEl = document.getElementById('overlay');
+        const overlayTitle = document.getElementById('overlay-title');
+        const overlayDesc = document.getElementById('overlay-desc');
+        const overlayIcon = document.getElementById('overlay-icon');
+        const startBtn = document.getElementById('start-btn');
+
+        function generateSolvableBoard() {
+            cars = [];
+            grid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
+
+            const targetCarsCount = TARGET_CARS;
+            const directions = ['UP', 'DOWN', 'LEFT', 'RIGHT'];
+
+            function canEscape(r, c, length, dir, tempGrid) {
+                let cells = [];
+                for (let i = 0; i < length; i++) {
+                    let cr = r;
+                    let cc = c;
+                    if (dir === 'UP') cr = r + i;
+                    else if (dir === 'DOWN') cr = r - i;
+                    else if (dir === 'LEFT') cc = c + i;
+                    else if (dir === 'RIGHT') cc = c - i;
+
+                    if (cr < 0 || cr >= GRID_SIZE || cc < 0 || cc >= GRID_SIZE) return false;
+                    if (tempGrid[cr][cc] !== null) return false;
+                    cells.push({ r: cr, c: cc });
+                }
+
+                let headR = r;
+                let headC = c;
+                while (true) {
+                    if (dir === 'UP') headR--;
+                    else if (dir === 'DOWN') headR++;
+                    else if (dir === 'LEFT') headC--;
+                    else if (dir === 'RIGHT') headC++;
+
+                    if (headR < 0 || headR >= GRID_SIZE || headC < 0 || headC >= GRID_SIZE) {
+                        return true;
+                    }
+
+                    if (tempGrid[headR][headC] !== null && !cells.some(cell => cell.r === headR && cell.c === headC)) {
+                        return false;
+                    }
+                }
+            }
+
+            let carId = 0;
+            let placedCars = [];
+            let attempts = 0;
+
+            // 4방향(UP, DOWN, LEFT, RIGHT) 탈출 방향을 20개씩 완벽하게 균등 분산하여 쏠림 현상 방지
+            let dirPool = [];
+            for (let i = 0; i < 20; i++) {
+                dirPool.push('UP');
+            }
+            for (let i = 0; i < 20; i++) {
+                dirPool.push('DOWN');
+            }
+            for (let i = 0; i < 20; i++) {
+                dirPool.push('LEFT');
+            }
+            for (let i = 0; i < 20; i++) {
+                dirPool.push('RIGHT');
+            }
+            dirPool.sort(() => Math.random() - 0.5);
+
+            while (placedCars.length < targetCarsCount && attempts < 15000) {
+                attempts++;
+
+                let emptySpots = [];
+                for (let r = 0; r < GRID_SIZE; r++) {
+                    for (let c = 0; c < GRID_SIZE; c++) {
+                        if (grid[r][c] === null) emptySpots.push({ r, c });
+                    }
+                }
+                emptySpots.sort(() => Math.random() - 0.5);
+
+                let placedInThisTurn = false;
+
+                for (let spot of emptySpots) {
+                    let preferredDir = dirPool[placedCars.length % dirPool.length];
+                    let shuffledDirs = [preferredDir, ...directions.filter(d => d !== preferredDir)].sort(() => Math.random() - 0.5);
+                    
+                    let randVal = Math.random();
+                    let carLength = 1;
+                    if (randVal > 0.4 && randVal <= 0.85) carLength = 2;
+                    else if (randVal > 0.85) carLength = 3;
+
+                    for (let dir of shuffledDirs) {
+                        if (canEscape(spot.r, spot.c, carLength, dir, grid)) {
+                            const colorObj = CAR_COLORS[carId % CAR_COLORS.length];
+                            const car = {
+                                id: carId,
+                                r: spot.r,
+                                c: spot.c,
+                                length: carLength,
+                                dir: dir,
+                                color: colorObj,
+                                escaped: false
+                            };
+
+                            for (let i = 0; i < carLength; i++) {
+                                let cr = spot.r;
+                                let cc = spot.c;
+                                if (dir === 'UP') cr = spot.r + i;
+                                else if (dir === 'DOWN') cr = spot.r - i;
+                                else if (dir === 'LEFT') cc = spot.c + i;
+                                else if (dir === 'RIGHT') cc = spot.c - i;
+                                grid[cr][cc] = carId;
+                            }
+
+                            placedCars.push(car);
+                            carId++;
+                            placedInThisTurn = true;
+                            break;
+                        }
+                    }
+                    if (placedInThisTurn) break;
+                }
+
+                if (!placedInThisTurn && attempts % 1500 === 0) {
+                    grid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
+                    placedCars = [];
+                    carId = 0;
+                    dirPool.sort(() => Math.random() - 0.5);
+                }
+            }
+
+            cars = placedCars;
+            remainingCars = cars.length;
+            renderBoard();
+        }
+
+        function renderBoard() {
+            boardEl.innerHTML = '';
+            const cellPercent = 100 / GRID_SIZE;
+
+            cars.forEach(car => {
+                if (car.escaped) return;
+
+                const carDiv = document.createElement('div');
+                carDiv.id = `car-${car.id}`;
+                carDiv.className = `car absolute flex flex-col items-center justify-center font-black rounded ${car.color.bg} ${car.color.border} ${car.color.text} shadow cursor-pointer select-none border`;
+                
+                let widthPercent = cellPercent;
+                let heightPercent = cellPercent;
+
+                if (car.dir === 'UP' || car.dir === 'DOWN') {
+                    heightPercent = cellPercent * car.length;
+                } else {
+                    widthPercent = cellPercent * car.length;
+                }
+
+                let topR = car.r;
+                let leftC = car.c;
+
+                if (car.length > 1) {
+                    if (car.dir === 'UP') topR = car.r;
+                    else if (car.dir === 'DOWN') topR = car.r - (car.length - 1);
+                    else if (car.dir === 'LEFT') leftC = car.c;
+                    else if (car.dir === 'RIGHT') leftC = car.c - (car.length - 1);
+                }
+
+                carDiv.style.width = `calc(${widthPercent}% - 0.5px)`;
+                carDiv.style.height = `calc(${heightPercent}% - 0.5px)`;
+                carDiv.style.left = `calc(${leftC * cellPercent}% + 0.25px)`;
+                carDiv.style.top = `calc(${topR * cellPercent}% + 0.25px)`;
+
+                let icon = '🚘';
+                if (car.length === 2) icon = '🚚';
+                if (car.length === 3) icon = '🚌';
+
+                carDiv.innerHTML = `
+                    <span class="text-[7px] leading-none text-white opacity-95 font-bold">${ARROWS[car.dir]}</span>
+                    <span class="text-[8px] leading-none">${icon}</span>
+                `;
+
+                carDiv.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    tryMoveCar(car.id);
+                });
+
+                boardEl.appendChild(carDiv);
+            });
+
+            remainingCarsEl.textContent = remainingCars;
+        }
+
+        function tryMoveCar(carId) {
+            if (!isPlaying) return;
+
+            const car = cars.find(c => c.id === carId);
+            if (!car || car.escaped) return;
+
+            initAudio();
+
+            let obstacleSteps = 0;
+            let checkR = car.r;
+            let checkC = car.c;
+
+            if (car.length > 1) {
+                if (car.dir === 'DOWN') checkR = car.r;
+                else if (car.dir === 'RIGHT') checkC = car.c;
+            }
+
+            while (true) {
+                if (car.dir === 'UP') checkR--;
+                else if (car.dir === 'DOWN') checkR++;
+                else if (car.dir === 'LEFT') checkC--;
+                else if (car.dir === 'RIGHT') checkC++;
+
+                if (checkR < 0 || checkR >= GRID_SIZE || checkC < 0 || checkC >= GRID_SIZE) {
+                    break;
+                }
+
+                if (grid[checkR][checkC] !== null && grid[checkR][checkC] !== car.id) {
+                    break;
+                }
+                obstacleSteps++;
+            }
+
+            const carEl = document.getElementById(`car-${car.id}`);
+            const boardWidth = boardEl.clientWidth;
+            const stepPx = boardWidth / GRID_SIZE;
+
+            let finalCheckR = car.r;
+            let finalCheckC = car.c;
+            if (car.length > 1) {
+                if (car.dir === 'DOWN') finalCheckR = car.r;
+                else if (car.dir === 'RIGHT') finalCheckC = car.c;
+            }
+            for (let s = 0; s <= obstacleSteps; s++) {
+                if (car.dir === 'UP') finalCheckR--;
+                else if (car.dir === 'DOWN') finalCheckR++;
+                else if (car.dir === 'LEFT') finalCheckC--;
+                else if (car.dir === 'RIGHT') finalCheckC++;
+            }
+            
+            const isOutOfBounds = (finalCheckR < 0 || finalCheckR >= GRID_SIZE || finalCheckC < 0 || finalCheckC >= GRID_SIZE);
+
+            if (!isOutOfBounds) {
+                playCrashSound();
+
+                let forwardX = 0;
+                let forwardY = 0;
+                const distancePx = obstacleSteps * stepPx;
+
+                if (car.dir === 'UP') forwardY = -distancePx;
+                if (car.dir === 'DOWN') forwardY = distancePx;
+                if (car.dir === 'LEFT') forwardX = -distancePx;
+                if (car.dir === 'RIGHT') forwardX = distancePx;
+
+                carEl.style.transition = 'transform 0.15s ease-out';
+                carEl.style.transform = `translate(${forwardX}px, ${forwardY}px)`;
+
+                setTimeout(() => {
+                    if (carEl) {
+                        carEl.style.transition = 'transform 0.2s cubic-bezier(0.5, 1.5, 0.5, 1)';
+                        carEl.style.transform = 'translate(0px, 0px)';
+                    }
+                }, 160);
+
+            } else {
+                playSuccessSound();
+
+                let exitX = 0;
+                let exitY = 0;
+                const exitDist = 600;
+
+                if (car.dir === 'UP') exitY = -exitDist;
+                if (car.dir === 'DOWN') exitY = exitDist;
+                if (car.dir === 'LEFT') exitX = -exitDist;
+                if (car.dir === 'RIGHT') exitX = exitDist;
+
+                carEl.style.transition = 'transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease-out';
+                carEl.style.transform = `translate(${exitX}px, ${exitY}px)`;
+                carEl.style.opacity = '0';
+                carEl.style.pointerEvents = 'none';
+
+                for (let r = 0; r < GRID_SIZE; r++) {
+                    for (let c = 0; c < GRID_SIZE; c++) {
+                        if (grid[r][c] === car.id) grid[r][c] = null;
+                    }
+                }
+
+                car.escaped = true;
+                remainingCars--;
+                remainingCarsEl.textContent = remainingCars;
+
+                if (remainingCars === 0) {
+                    endGame(true);
+                }
+            }
+        }
+
+        function startGame() {
+            initAudio();
+            generateSolvableBoard();
+            isPlaying = true;
+            startTime = Date.now();
+            overlayEl.classList.add('opacity-0', 'pointer-events-none');
+            startTimer();
+        }
+
+        function startTimer() {
+            stopTimer();
+            timerInterval = setInterval(() => {
+                if (!isPlaying) return;
+                elapsedTime = (Date.now() - startTime) / 1000;
+                let timeLeft = TIME_LIMIT - elapsedTime;
+
+                if (timeLeft <= 0) {
+                    timeLeft = 0;
+                    timerEl.textContent = "0.0";
+                    endGame(false);
+                } else {
+                    timerEl.textContent = timeLeft.toFixed(1);
+                }
+            }, 100);
+        }
+
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+        }
+
+        function endGame(isVictory) {
+            isPlaying = false;
+            stopTimer();
+
+            overlayEl.classList.remove('opacity-0', 'pointer-events-none');
+
+            if (isVictory) {
+                playVictorySound();
+                overlayIcon.textContent = '🏆';
+                overlayTitle.textContent = '성공! 탈출 완료!';
+                overlayDesc.innerHTML = `걸린 시간: <span class="text-amber-400 font-bold text-lg">${elapsedTime.toFixed(1)}초</span><br>모든 차량을 빼냈습니다!`;
+                startBtn.textContent = '다시 도전하기';
+            } else {
+                playGameOverSound();
+                overlayIcon.textContent = '💥';
+                overlayTitle.textContent = '타임 오버 (실패)';
+                overlayDesc.innerHTML = `남은 차량: <span class="text-red-400 font-bold">${remainingCars}대</span><br>60초 시간 내에 모두 빼내지 못했습니다.`;
+                startBtn.textContent = '다시 시도하기';
+            }
+        }
+
+        function resetGame() {
+            stopTimer();
+            isPlaying = false;
+            timerEl.textContent = "60.0";
+            generateSolvableBoard();
+            overlayIcon.textContent = '🚌';
+            overlayTitle.textContent = `주차지옥 80대 (고난도 4방향)`;
+            overlayDesc.textContent = `4방향으로 얽혀있는 80대의 차량을 순서대로 풀어보세요!`;
+            startBtn.textContent = '게임 시작';
+            overlayEl.classList.remove('opacity-0', 'pointer-events-none');
+        }
+
+        window.onload = function() {
+            generateSolvableBoard();
+        };
+    </script>
+</body>
+</html>
